@@ -1,0 +1,1 @@
+A service for creating namespaces with permissions
