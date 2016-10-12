@@ -37,37 +37,22 @@ USER3 = json.loads(b64_decode(TOKEN3.split('.')[1]))['user_id']
 
 def main():
     
-    print 'sending requests to %s' % BASE_URL 
+    # POST namespace
 
-    # DELETE namespace
-
-    namespace_url = urljoin(BASE_URL, '/namespaces;acme') 
-    headers = {'Accept': 'application/json','Authorization': 'Bearer %s' % TOKEN1}
-    r = requests.delete(namespace_url, headers=headers)
-    if r.status_code == 200:
-        print 'correctly deleted namespace: %s' % (namespace_url)
-    elif r.status_code == 404:
-        print 'info: %s was not there' % namespace_url
-    else:
-        print 'failed delete of %s status_code: %s text: %s' %(namespace_url, r.status_code, r.text)
-        return
-
-    namespace = {
-        'isA': 'Namespace',
+    customer = {
+        'isA': 'Customer',
         'name': 'acme'
         }
 
-    namespaces_url = urljoin(BASE_URL, '/namespaces') 
-    
-    # POST namespace
+    customers_url = urljoin(BASE_URL, '/customers') 
 
     headers = {'Content-Type': 'application/json','Authorization': 'Bearer %s' % TOKEN1}
-    r = requests.post(namespaces_url, headers=headers, json=namespace)
+    r = requests.post(customers_url, headers=headers, json=customer)
     if r.status_code == 201:
-        print 'correctly created namespace %s ' % (r.headers['Location'])
-        namespace_url = urljoin(BASE_URL, r.headers['Location'])
+        print 'correctly created customer %s ' % (r.headers['Location'])
+        acme_url = urljoin(BASE_URL, r.headers['Location'])
     else:
-        print 'failed to create namespace %s %s %s' % (namespaces_url, r.status_code, r.text)
+        print 'failed to create customer %s %s %s' % (customers_url, r.status_code, r.text)
         return
     return
 
