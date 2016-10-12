@@ -1,1 +1,1 @@
-A service for creating namespaces with permissions
+A service for creating customers. Only sysAdmins can create them
