@@ -37,7 +37,7 @@ USER3 = json.loads(b64_decode(TOKEN3.split('.')[1]))['user_id']
 
 def main():
     
-    # POST namespace
+    # POST customer
 
     customer = {
         'isA': 'Customer',
@@ -56,7 +56,7 @@ def main():
         return
     return
 
-    # GET namespace
+    # GET customer
 
     headers = {'Accept': 'application/json','Authorization': 'Bearer %s' % TOKEN1}
     r = requests.get(namespace_url, headers=headers, json=namespace)

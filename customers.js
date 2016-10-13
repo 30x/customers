@@ -9,36 +9,13 @@ var baseURL = `${process.env.INTERNAL_PROTOCOL}://${process.env.INTERNAL_ROUTER}
 function init(serverReq, serverRes, callback) {
   // make sure there is a sys_admin team. If not, create it and specify that only members of that team can create customers
   function createSysAdminTeam() {
-    var sysAdmins = {isA: 'Team', members: [lib.getUser(serverReq)]}
+    var sysAdmins = {isA: 'Team', members: [lib.getUser(serverReq)], permissions: {_self: {read: [''], update: ['']}, _permissions: {read: [''], update: ['']}}} // '' is null relative URL
     lib.sendInternalRequest(serverReq, serverRes, '/teams', 'POST', JSON.stringify(sysAdmins), function (clientRes) {
       lib.getClientResponseBody(clientRes, function(body) {
         if (clientRes.statusCode == 201)
-          patchSysAdminTeamPermissions(clientRes, body)
+          secureCustomersList(clientRes.headers.location)
         else
           lib.internalError(serverRes, `unable to create sysAdmin team statusCode: ${clientRes.statusCode} body: ${body}`)
-      })
-    })    
-  }
-  function patchSysAdminTeamPermissions(clientRes, body) {
-    var team = JSON.parse(body)
-    var teamURL = clientRes.headers.location
-    var permissionsURL = team._permissions
-    var patch = {_permissions: {read:[teamURL], update: [teamURL], create: null, delete: null}, _self: {read:[teamURL], update: [teamURL], create: null, delete: null}}
-    var patchHeaders = {'content-type': 'application/merge-patch+json'}
-    lib.sendInternalRequest(serverReq, serverRes, permissionsURL, 'GET', JSON.stringify(patch), patchHeaders, function (clientRes) {
-      lib.getClientResponseBody(clientRes, function(body) {
-        if (clientRes.statusCode == 200) {
-          patchHeaders['if-match'] = clientRes.headers.etag
-          lib.sendInternalRequest(serverReq, serverRes, permissionsURL, 'PATCH', JSON.stringify(patch), patchHeaders, function (clientRes) {
-            lib.getClientResponseBody(clientRes, function(body) {
-              if (clientRes.statusCode == 200) // successfully patched permissions for sysAdmin team
-                secureCustomersList(teamURL)
-              else 
-                lib.internalError(serverRes, `unable to patch sysAdmin team permissions statusCode: ${clientRes.statusCode} body: ${body}`)
-            })
-          })
-        } else
-          lib.internalError(serverRes, `unable to retrieve sysAdmin team permissions at ${team._permissions} statusCode: ${clientRes.statusCode} body: ${body}`)
       })
     })    
   }
