@@ -2,6 +2,7 @@
 const http = require('http')
 const url = require('url')
 const lib = require('http-helper-functions')
+const pLib = require('permissions-helper-functions')
 
 var initialized = false
 var baseURL = `${process.env.INTERNAL_PROTOCOL}://${process.env.INTERNAL_ROUTER}`
@@ -9,7 +10,7 @@ var baseURL = `${process.env.INTERNAL_PROTOCOL}://${process.env.INTERNAL_ROUTER}
 function init(serverReq, serverRes, callback) {
   // make sure there is a sys_admin team. If not, create it and specify that only members of that team can create customers
   function createSysAdminTeam() {
-    var sysAdmins = {isA: 'Team', members: [lib.getUser(serverReq)], permissions: {_self: {read: [''], update: ['']}, _permissions: {read: [''], update: ['']}}} // '' is null relative URL
+    var sysAdmins = {isA: 'Team', members: [lib.getUser(serverReq.headers.authorization)], permissions: {_self: {read: [''], update: ['']}, _permissions: {read: [''], update: ['']}}} // '' is null relative URL
     lib.sendInternalRequest(serverReq.headers, '/teams', 'POST', JSON.stringify(sysAdmins), function (err, clientRes) {
       if (err)
         lib.internalError(serverRes, err)
@@ -60,24 +61,28 @@ function verifyCustomer(ns) {
 
 function createCustomer(req, res, ns) {
   function primCreateCustomer() {
-    var user = lib.getUser(req)
+    var user = lib.getUser(req.headers.authorization)
     if (user == null) {
       lib.unauthorized(req, res)
     } else 
-      lib.ifAllowedThen(req, res, null, '_self', 'create', function() { 
-        var err = verifyCustomer(ns)
-        if (err !== null)
-          lib.badRequest(res, err)
+      pLib.ifAllowedThen(req.headers, null, '_self', 'create', function(err, reason) {
+        if (err)
+          lib.internalError(res, reason)
         else {
-          var permissions = ns.permissions
-          if (permissions !== undefined)
-            delete ns.permissions
-          var selfURL = makeSelfURL(req, ns.name)
-          lib.createPermissonsFor(req, res, selfURL, permissions, function(permissionsURL, permissions){
-            addCalculatedCustomerProperties(req, ns, selfURL)
-            lib.created(req, res, ns, selfURL)
-          })
-          // We are not going to store any information about a customer, since we can recover its name from its url 
+          var err = verifyCustomer(ns)
+          if (err !== null)
+            lib.badRequest(res, err)
+          else {
+            var permissions = ns.permissions
+            if (permissions !== undefined)
+              delete ns.permissions
+            var selfURL = makeSelfURL(req, ns.name)
+            lib.createPermissonsFor(req, res, selfURL, permissions, function(permissionsURL, permissions){
+              addCalculatedCustomerProperties(req, ns, selfURL)
+              lib.created(req, res, ns, selfURL)
+            })
+            // We are not going to store any information about a customer, since we can recover its name from its url 
+          }
         }
       })
   }
@@ -97,32 +102,39 @@ function addCalculatedCustomerProperties(req, map, selfURL) {
 }
 
 function getCustomer(req, res, id) {
-  lib.ifAllowedThen(req, res, null, '_self', 'read', function() {
-    var selfURL = makeSelfURL(req, id)
-    var customer = {isA: 'Customer', name: req.url.split('/').slice(-1)[0]}
-    addCalculatedCustomerProperties(req, customer, selfURL)
-    lib.found(req, res, customer)
+  pLib.ifAllowedThen(req.headers, null, '_self', 'read', function(err, reason) {
+    if (err)
+      lib.internalError(res, reason)
+    else {
+      var selfURL = makeSelfURL(req, id)
+      var customer = {isA: 'Customer', name: req.url.split('/').slice(-1)[0]}
+      addCalculatedCustomerProperties(req, customer, selfURL)
+      lib.found(req, res, customer)
+    }
   })
 }
 
 function deleteCustomer(req, res, id) {
-  lib.ifAllowedThen(req, res, null, '_self', 'delete', function() {
-    lib.sendInternalRequest(req.headers, `/permissions?/customers;${id}`, 'DELETE', null, function (err, clientRes) {
-      if (err)
-        lib.internalError(res, err)
-      else if (clientRes.statusCode == 404)
-        lib.notFound(req, res)
-      else if (clientRes.statusCode == 200) {
-        var selfURL = makeSelfURL(req, id)
-        var customer = {isA: 'Customer', name: req.url.split('/').slice(-1)[0]}
-        addCalculatedCustomerProperties(req, customer, selfURL)
-        lib.found(req, res, customer)
-      } else
-        getClientResponseBody(clientRes, function(body) {
-          var err = {statusCode: clientRes.statusCode, msg: `failed to create permissions for ${resourceURL} statusCode ${clientRes.statusCode} message ${body}`}
-          internalError(serverRes, err)
-        })
-    })
+  lib.ifAllowedThen(req.headers, null, '_self', 'delete', function(err, reason) {
+    if (err)
+      lib.internalError(res, reason)
+    else
+      lib.sendInternalRequest(req.headers, `/permissions?/customers;${id}`, 'DELETE', null, function (err, clientRes) {
+        if (err)
+          lib.internalError(res, err)
+        else if (clientRes.statusCode == 404)
+          lib.notFound(req, res)
+        else if (clientRes.statusCode == 200) {
+          var selfURL = makeSelfURL(req, id)
+          var customer = {isA: 'Customer', name: req.url.split('/').slice(-1)[0]}
+          addCalculatedCustomerProperties(req, customer, selfURL)
+          lib.found(req, res, customer)
+        } else
+          getClientResponseBody(clientRes, function(body) {
+            var err = {statusCode: clientRes.statusCode, msg: `failed to create permissions for ${resourceURL} statusCode ${clientRes.statusCode} message ${body}`}
+            internalError(serverRes, err)
+          })
+      })
   })
 }
 
