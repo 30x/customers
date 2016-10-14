@@ -3,9 +3,11 @@ const http = require('http')
 const url = require('url')
 const lib = require('http-helper-functions')
 const pLib = require('permissions-helper-functions')
+const db = require('./customers-db')
 
 var initialized = false
-var baseURL = `${process.env.INTERNAL_PROTOCOL}://${process.env.INTERNAL_ROUTER}`
+const baseURL = `${process.env.INTERNAL_PROTOCOL}://${process.env.INTERNAL_ROUTER}`
+const CUST = '/cust-'
 
 function init(serverReq, serverRes, callback) {
   // make sure there is a sys_admin team. If not, create it and specify that only members of that team can create customers
@@ -25,16 +27,14 @@ function init(serverReq, serverRes, callback) {
   }
   function secureCustomersList(teamURL) {
     var permissions = {_subject: '/customers', _self: {read:[teamURL], create: [teamURL], delete: [teamURL]}, _permissions: {read: [teamURL], update: [teamURL]}}
-    lib.sendInternalRequest(serverReq.headers, '/permissions', 'POST', JSON.stringify(permissions), function (err, clientRes) {
-      if (err)
-        lib.internalError(serverRes, err)
-      else
-        lib.getClientResponseBody(clientRes, function(body) {
-          if (clientRes.statusCode == 201)
-            callback()
-          else
-            lib.internalError(serverRes, `unable to secure /customers resource statusCode: ${clientRes.statusCode} body: ${body}`)
-        })
+    lib.sendInternalRequestThen(serverReq.headers, serverRes, '/permissions', 'POST', JSON.stringify(permissions), function (clientRes) {
+      lib.getClientResponseBody(clientRes, function(body) {
+        if (clientRes.statusCode == 201) {
+          initialized = true
+          callback()
+        } else
+          lib.internalError(serverRes, `unable to secure /customers resource statusCode: ${clientRes.statusCode} body: ${body}`)
+      })
     })
   }
   lib.sendInternalRequest(serverReq.headers, '/permissions?/customers', 'GET', null, function (err, clientRes) {
@@ -44,44 +44,52 @@ function init(serverReq, serverRes, callback) {
       lib.getClientResponseBody(clientRes, function(body) {
         if (clientRes.statusCode == 404)
           createSysAdminTeam()
-        else if (clientRes.statusCode == 200)
+        else if (clientRes.statusCode == 200) {
+          initialized = true
           callback()
-        else
+        } else
           lib.internalError(res, 'unable to create permissions for /customers')
       })
   })
 }
 
-function verifyCustomer(ns) {
-  var name = ns.name
+function verifyCustomer(customer) {
+  var name = customer.name
   if (typeof name != 'string')
     return `customer name must be a string`
+  if (customer.isA != 'Customer')
+    return `customer must have an isA property with value "Customer"`
   return null
 }
 
-function createCustomer(req, res, ns) {
+function createCustomer(req, res, customer) {
   function primCreateCustomer() {
     var user = lib.getUser(req.headers.authorization)
     if (user == null) {
       lib.unauthorized(req, res)
     } else 
-      pLib.ifAllowedThen(req.headers, null, '_self', 'create', function(err, reason) {
-        if (err)
-          lib.internalError(res, reason)
+      pLib.ifAllowedThen(req.headers, '/customers', '_self', 'create', function(err) {
+        if (err) 
+          lib.internalError(res, err)
         else {
-          var err = verifyCustomer(ns)
+          var err = verifyCustomer(customer)
           if (err !== null)
             lib.badRequest(res, err)
           else {
-            var permissions = ns.permissions
+            var permissions = customer.permissions
             if (permissions !== undefined)
-              delete ns.permissions
-            var selfURL = makeSelfURL(req, ns.name)
-            lib.createPermissonsFor(req, res, selfURL, permissions, function(permissionsURL, permissions){
-              addCalculatedCustomerProperties(req, ns, selfURL)
-              lib.created(req, res, ns, selfURL)
+              delete customer.permissions
+            var id = lib.uuid4()
+            var selfURL = makeSelfURL(req, id)
+            pLib.createPermissionsThen(req, res, selfURL, permissions, function(permissionsURL, permissions){
+              // Create permissions first. If we fail after creating the permissions resource but before creating the main resource, 
+              // there will be a useless but harmless permissions document.
+              // If we do things the other way around, a customer without matching permissions could cause problems.
+              db.createCustomerThen(req, res, id, customer, function(etag) {
+                addCalculatedProperties(req, customer, selfURL)
+                lib.created(req, res, customer, customer.self, etag)
+              })
             })
-            // We are not going to store any information about a customer, since we can recover its name from its url 
           }
         }
       })
@@ -93,52 +101,51 @@ function createCustomer(req, res, ns) {
 }
 
 function makeSelfURL(req, key) {
-  return `//${req.headers.host}/customers;${key}`
+  return `//${req.headers.host}${CUST}${key}`
 }
 
-function addCalculatedCustomerProperties(req, map, selfURL) {
-  map.self = selfURL
-  map._permissions = `protocol://authority/permissions?${map.self}`
+function addCalculatedProperties(req, entity, selfURL) {
+  entity.self = selfURL
+  entity._permissions = `protocol://authority/permissions?${entity.self}`
 }
 
 function getCustomer(req, res, id) {
-  pLib.ifAllowedThen(req.headers, null, '_self', 'read', function(err, reason) {
+  pLib.ifAllowedThen(req.headers, '//' + req.headers.host + req.url, '_self', 'read', function(err, reason) {
     if (err)
       lib.internalError(res, reason)
-    else {
-      var selfURL = makeSelfURL(req, id)
-      var customer = {isA: 'Customer', name: req.url.split('/').slice(-1)[0]}
-      addCalculatedCustomerProperties(req, customer, selfURL)
-      lib.found(req, res, customer)
-    }
+    else
+      db.withCustomerDo(req, res, id, function(customer , etag) {
+        var selfURL = makeSelfURL(req, id)
+        addCalculatedProperties(req, customer, selfURL)
+        lib.found(req, res, customer, etag)
+      })
   })
 }
 
 function deleteCustomer(req, res, id) {
-  lib.ifAllowedThen(req.headers, null, '_self', 'delete', function(err, reason) {
+  pLib.ifAllowedThen(req.headers, '//' + req.headers.host + req.url, '_self', 'delete', function(err, reason) {
     if (err)
       lib.internalError(res, reason)
     else
-      lib.sendInternalRequest(req.headers, `/permissions?/customers;${id}`, 'DELETE', null, function (err, clientRes) {
-        if (err)
-          lib.internalError(res, err)
-        else if (clientRes.statusCode == 404)
-          lib.notFound(req, res)
-        else if (clientRes.statusCode == 200) {
+      lib.sendInternalRequestThen(req.headers, res, `/permissions?/customers;${id}`, 'DELETE', null, function (err, clientRes) {
+        db.deleteCustomerThen(req, res, id, function (customer, etag) {
           var selfURL = makeSelfURL(req, id)
-          var customer = {isA: 'Customer', name: req.url.split('/').slice(-1)[0]}
-          addCalculatedCustomerProperties(req, customer, selfURL)
-          lib.found(req, res, customer)
-        } else
-          getClientResponseBody(clientRes, function(body) {
-            var err = {statusCode: clientRes.statusCode, msg: `failed to create permissions for ${resourceURL} statusCode ${clientRes.statusCode} message ${body}`}
-            internalError(serverRes, err)
-          })
+          addCalculatedProperties(req, customer, selfURL)
+          lib.found(req, res, customer, etag)
+        })
       })
   })
 }
 
 function requestHandler(req, res) {
+  function handleCustomerMethods(id) {
+    if (req.method == 'GET') 
+      getCustomer(req, res, id)
+    else if (req.method == 'DELETE') 
+      deleteCustomer(req, res, id)
+    else
+      lib.methodNotAllowed(req, res, ['GET', 'DELETE'])    
+  }
   if (req.url == '/customers')
     if (req.method == 'POST')
       lib.getServerPostObject(req, res, createCustomer)
@@ -146,20 +153,20 @@ function requestHandler(req, res) {
       lib.methodNotAllowed(req, res, ['POST'])
   else {
     var req_url = url.parse(req.url)
-    if (req_url.pathname.lastIndexOf('/customers;', 0) > -1 && req_url.search == null) {
-      var id = req_url.pathname.substring('/customers;'.length)
-      if (req.method == 'GET') 
-        getCustomer(req, res, id)
-      else if (req.method == 'DELETE') 
-        deleteCustomer(req, res, id)
-      else
-        lib.methodNotAllowed(req, res, ['GET', 'DELETE'])
-    } else 
+    if (req_url.pathname.startsWith(CUST) && req_url.search == null) 
+      handleCustomerMethods(req_url.pathname.substring(CUST.length))
+    else if (req_url.pathname.startsWith('/customers;') && req_url.search == null) 
+      db.withCustomerFromNameDo(req, res, req_url.pathname.split('/')[0].substring('/customers;'.length), function(id) {
+        handleCustomerMethods(id)
+      })
+    else
       lib.notFound(req, res)
   }
 }
 
-var port = process.env.PORT
-http.createServer(requestHandler).listen(port, function() {
-  console.log(`server is listening on ${port}`)
+db.init(function() {
+  var port = process.env.PORT
+  http.createServer(requestHandler).listen(port, function() {
+    console.log(`server is listening on ${port}`)
+  })
 })
