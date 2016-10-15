@@ -68,29 +68,25 @@ function createCustomer(req, res, customer) {
     if (user == null) {
       lib.unauthorized(req, res)
     } else 
-      pLib.ifAllowedThen(req.headers, '/customers', '_self', 'create', function(err) {
-        if (err) 
-          lib.internalError(res, err)
+      pLib.ifAllowedThen(req, res, '/customers', '_self', 'create', function() {
+        var err = verifyCustomer(customer)
+        if (err !== null)
+          lib.badRequest(res, err)
         else {
-          var err = verifyCustomer(customer)
-          if (err !== null)
-            lib.badRequest(res, err)
-          else {
-            var permissions = customer.permissions
-            if (permissions !== undefined)
-              delete customer.permissions
-            var id = lib.uuid4()
-            var selfURL = makeSelfURL(req, id)
-            pLib.createPermissionsThen(req, res, selfURL, permissions, function(permissionsURL, permissions){
-              // Create permissions first. If we fail after creating the permissions resource but before creating the main resource, 
-              // there will be a useless but harmless permissions document.
-              // If we do things the other way around, a customer without matching permissions could cause problems.
-              db.createCustomerThen(req, res, id, customer, function(etag) {
-                addCalculatedProperties(req, customer, selfURL)
-                lib.created(req, res, customer, customer.self, etag)
-              })
+          var permissions = customer.permissions
+          if (permissions !== undefined)
+            delete customer.permissions
+          var id = lib.uuid4()
+          var selfURL = makeSelfURL(req, id)
+          pLib.createPermissionsThen(req, res, selfURL, permissions, function(permissionsURL, permissions){
+            // Create permissions first. If we fail after creating the permissions resource but before creating the main resource, 
+            // there will be a useless but harmless permissions document.
+            // If we do things the other way around, a customer without matching permissions could cause problems.
+            db.createCustomerThen(req, res, id, customer, function(etag) {
+              addCalculatedProperties(req, customer, selfURL)
+              lib.created(req, res, customer, customer.self, etag)
             })
-          }
+          })
         }
       })
   }
@@ -110,30 +106,24 @@ function addCalculatedProperties(req, entity, selfURL) {
 }
 
 function getCustomer(req, res, id) {
-  pLib.ifAllowedThen(req.headers, '//' + req.headers.host + req.url, '_self', 'read', function(err, reason) {
-    if (err)
-      lib.internalError(res, reason)
-    else
-      db.withCustomerDo(req, res, id, function(customer , etag) {
-        var selfURL = makeSelfURL(req, id)
-        addCalculatedProperties(req, customer, selfURL)
-        lib.found(req, res, customer, etag)
-      })
+  pLib.ifAllowedThen(req, res, '//' + req.headers.host + req.url, '_self', 'read', function() {
+    db.withCustomerDo(req, res, id, function(customer , etag) {
+      var selfURL = makeSelfURL(req, id)
+      addCalculatedProperties(req, customer, selfURL)
+      lib.found(req, res, customer, etag)
+    })
   })
 }
 
 function deleteCustomer(req, res, id) {
-  pLib.ifAllowedThen(req.headers, '//' + req.headers.host + req.url, '_self', 'delete', function(err, reason) {
-    if (err)
-      lib.internalError(res, reason)
-    else
-      lib.sendInternalRequestThen(req.headers, res, `/permissions?/customers;${id}`, 'DELETE', null, function (err, clientRes) {
-        db.deleteCustomerThen(req, res, id, function (customer, etag) {
-          var selfURL = makeSelfURL(req, id)
-          addCalculatedProperties(req, customer, selfURL)
-          lib.found(req, res, customer, etag)
-        })
+  pLib.ifAllowedThen(req, res, '//' + req.headers.host + req.url, '_self', 'delete', function() {
+    lib.sendInternalRequestThen(req.headers, res, `/permissions?/customers;${id}`, 'DELETE', null, function (err, clientRes) {
+      db.deleteCustomerThen(req, res, id, function (customer, etag) {
+        var selfURL = makeSelfURL(req, id)
+        addCalculatedProperties(req, customer, selfURL)
+        lib.found(req, res, customer, etag)
       })
+    })
   })
 }
 
