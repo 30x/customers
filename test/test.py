@@ -19,21 +19,24 @@ if 'APIGEE_TOKEN1' in env:
 else:
     with open('token.txt') as f:
         TOKEN1 = f.read()
-USER1 = json.loads(b64_decode(TOKEN1.split('.')[1]))['user_id']
+claims = json.loads(b64_decode(TOKEN1.split('.')[1]))
+USER1 = claims['iss'] + '#' + claims['sub']
 
 if 'APIGEE_TOKEN2' in env:
     TOKEN2 = env['APIGEE_TOKEN2']
 else:
     with open('token2.txt') as f:
         TOKEN2 = f.read()
-USER2 = json.loads(b64_decode(TOKEN2.split('.')[1]))['user_id']
+claims = json.loads(b64_decode(TOKEN2.split('.')[1]))
+USER2 = claims['iss'] + '#' + claims['sub']
 
 if 'APIGEE_TOKEN3' in env:
     TOKEN3 = env['APIGEE_TOKEN3']
 else:
     with open('token3.txt') as f:
         TOKEN3 = f.read()
-USER3 = json.loads(b64_decode(TOKEN3.split('.')[1]))['user_id']
+claims = json.loads(b64_decode(TOKEN3.split('.')[1]))
+USER3 = claims['iss'] + '#' + claims['sub']
 
 def main():
     
@@ -56,7 +59,8 @@ def main():
 
     customer = {
         'isA': 'Customer',
-        'name': 'acme'
+        'name': 'acme',
+        'initialCustomerAdmin': USER1
     }
 
     customers_url = urljoin(BASE_URL, '/customers') 

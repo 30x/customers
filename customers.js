@@ -9,47 +9,51 @@ var initialized = false
 const baseURL = `${process.env.INTERNAL_PROTOCOL}://${process.env.INTERNAL_ROUTER}`
 const CUST = '/cust-'
 
-function init(serverReq, serverRes, callback) {
-  // make sure there is a sys_admin team. If not, create it and specify that only members of that team can create customers
-  function createSysAdminTeam() {
-    var sysAdmins = {isA: 'Team', members: [lib.getUser(serverReq.headers.authorization)], permissions: {_self: {read: [''], update: ['']}, _permissions: {read: [''], update: ['']}}} // '' is null relative URL
-    lib.sendInternalRequest(serverReq.headers, '/teams', 'POST', JSON.stringify(sysAdmins), function (err, clientRes) {
-      if (err)
-        lib.internalError(serverRes, err)
-      else
-        lib.getClientResponseBody(clientRes, function(body) {
-          if (clientRes.statusCode == 201)
-            secureCustomersList(clientRes.headers.location)
-          else
-            lib.internalError(serverRes, `unable to create sysAdmin team statusCode: ${clientRes.statusCode} body: ${body}`)
-        })
-    })    
-  }
-  function secureCustomersList(teamURL) {
-    var permissions = {_subject: '/customers', _self: {read:[teamURL], create: [teamURL], delete: [teamURL]}, _permissions: {read: [teamURL], update: [teamURL]}}
+function createAdminTeamFor(serverReq, serverRes, subject, initialMember, permissions_f, callback) {
+  function secureSubject(teamURL) {
+    var permissions = permissions_f(teamURL)
+    permissions._subject = subject
     lib.sendInternalRequestThen(serverReq.headers, serverRes, '/permissions', 'POST', JSON.stringify(permissions), function (clientRes) {
       lib.getClientResponseBody(clientRes, function(body) {
         if (clientRes.statusCode == 201) {
           initialized = true
           callback()
         } else
-          lib.internalError(serverRes, `unable to secure /customers resource statusCode: ${clientRes.statusCode} body: ${body}`)
+          lib.internalError(serverRes, `unable to secure ${subject} statusCode: ${clientRes.statusCode} body: ${body}`)
       })
     })
   }
-  lib.sendInternalRequest(serverReq.headers, '/permissions?/customers', 'GET', null, function (err, clientRes) {
-    if (err)
-      lib.internalError(serverRes, err)
-    else
-      lib.getClientResponseBody(clientRes, function(body) {
-        if (clientRes.statusCode == 404)
-          createSysAdminTeam()
-        else if (clientRes.statusCode == 200) {
-          initialized = true
-          callback()
-        } else
-          lib.internalError(res, 'unable to create permissions for /customers')
-      })
+  // because of the null relative URLs ('') in the following, the asministrator for the team is the team itself
+  var admins = {isA: 'Team', members: [initialMember], permissions: {_self: {read: [''], update: ['']}, _permissions: {read: [''], update: ['']}}} // '' is null relative URL
+  lib.sendInternalRequestThen(serverReq.headers, serverRes, '/teams', 'POST', JSON.stringify(admins), function (clientRes) {
+    lib.getClientResponseBody(clientRes, function(body) {
+      if (clientRes.statusCode == 201)
+        secureSubject(clientRes.headers.location)
+      else
+        lib.internalError(serverRes, `unable to create sysAdmin team statusCode: ${clientRes.statusCode} body: ${body}`)
+    })
+  })    
+}
+
+function init(serverReq, serverRes, callback) {
+  // make sure there is a hostAdmin team. If not, create it and specify that only members of that team can create customers
+  lib.sendInternalRequestThen(serverReq.headers, serverRes, '/permissions?/customers', 'GET', null, function (clientRes) {
+    lib.getClientResponseBody(clientRes, function(body) {
+      if (clientRes.statusCode == 404) {
+        var initialAdmin = lib.getUser(serverReq.headers.authorization)
+        var initialPermissions = function(teamURL) {
+          return {
+            _self: {read:[teamURL], create: [teamURL], delete: [teamURL]}, 
+            _permissions: {read: [teamURL], update: [teamURL]}
+          }
+        }
+        createAdminTeamFor(serverReq, serverRes, '/customers', initialAdmin, initialPermissions, callback) // current caller will be initial hostAdmin
+      } else if (clientRes.statusCode == 200) {
+        initialized = true
+        callback()
+      } else
+        lib.internalError(res, 'unable to create permissions for /customers')
+    })
   })
 }
 
@@ -59,6 +63,8 @@ function verifyCustomer(customer) {
     return `customer name must be a string`
   if (customer.isA != 'Customer')
     return `customer must have an isA property with value "Customer"`
+  if (customer.initialCustomerAdmin == null)
+    return `customer must have an initial Admin`
   return null
 }
 
@@ -73,18 +79,22 @@ function createCustomer(req, res, customer) {
         if (err !== null)
           lib.badRequest(res, err)
         else {
-          var permissions = customer.permissions
-          if (permissions !== undefined)
-            delete customer.permissions
           var id = lib.uuid4()
           var selfURL = makeSelfURL(req, id)
-          pLib.createPermissionsThen(req, res, selfURL, permissions, function(permissionsURL, permissions){
+          function initialPermissions(teamURL) {
+            return {
+              _self: {read:[teamURL], create: [teamURL], delete: [teamURL]}, 
+              _permissions: {read: [teamURL], update: [teamURL]},
+              _dqss: {read:[teamURL], create: [teamURL], delete: [teamURL]}
+            }
+          }
+          createAdminTeamFor(req, res, selfURL, customer.initialCustomerAdmin, initialPermissions, function() {
             // Create permissions first. If we fail after creating the permissions resource but before creating the main resource, 
             // there will be a useless but harmless permissions document.
             // If we do things the other way around, a customer without matching permissions could cause problems.
             db.createCustomerThen(req, res, id, customer, function(etag) {
-              addCalculatedProperties(req, customer, selfURL)
-              lib.created(req, res, customer, customer.self, etag)
+                addCalculatedProperties(req, customer, selfURL)
+                lib.created(req, res, customer, customer.self, etag)
             })
           })
         }
