@@ -47,7 +47,7 @@ def main():
     headers = {'Content-Type': 'application/json','Authorization': 'Bearer %s' % TOKEN1}
     r = requests.delete(acme_url, headers=headers)
     if r.status_code == 200:
-        print 'correctly deleted customer %s ' % (r.headers['Location'])
+        print 'correctly deleted customer %s ' % (r.headers['Content-Location'])
     else:
         if r.status_code == 404:
             print 'customer %s not present' % acme_url

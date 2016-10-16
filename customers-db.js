@@ -45,4 +45,5 @@ exports.updateCustomerThen = updateCustomerThen
 exports.deleteCustomerThen = deleteCustomerThen
 exports.withCustomerDo = withCustomerDo
 exports.withCustomerFromNameDo = withCustomerFromNameDo
+exports.db = db
 exports.init = init

@@ -17,13 +17,13 @@ function createAdminTeamFor(serverReq, serverRes, subject, initialMember, permis
       lib.getClientResponseBody(clientRes, function(body) {
         if (clientRes.statusCode == 201) {
           initialized = true
-          callback()
+          callback(teamURL)
         } else
           lib.internalError(serverRes, `unable to secure ${subject} statusCode: ${clientRes.statusCode} body: ${body}`)
       })
     })
   }
-  // because of the null relative URLs ('') in the following, the asministrator for the team is the team itself
+  // because of the null relative URLs ('') in the following, the administrator for the team is the team itself
   var admins = {isA: 'Team', members: [initialMember], permissions: {_self: {read: [''], update: ['']}, _permissions: {read: [''], update: ['']}}} // '' is null relative URL
   lib.sendInternalRequestThen(serverReq.headers, serverRes, '/teams', 'POST', JSON.stringify(admins), function (clientRes) {
     lib.getClientResponseBody(clientRes, function(body) {
@@ -70,40 +70,46 @@ function verifyCustomer(customer) {
 
 function createCustomer(req, res, customer) {
   function primCreateCustomer() {
-    var user = lib.getUser(req.headers.authorization)
-    if (user == null) {
-      lib.unauthorized(req, res)
-    } else 
-      pLib.ifAllowedThen(req, res, '/customers', '_self', 'create', function() {
-        var err = verifyCustomer(customer)
-        if (err !== null)
-          lib.badRequest(res, err)
-        else {
-          var id = lib.uuid4()
-          var selfURL = makeSelfURL(req, id)
-          function initialPermissions(teamURL) {
-            return {
-              _self: {read:[teamURL], create: [teamURL], delete: [teamURL]}, 
-              _permissions: {read: [teamURL], update: [teamURL]},
-              _dqss: {read:[teamURL], create: [teamURL], delete: [teamURL]}
+    pLib.ifAllowedThen(req, res, '/customers', '_self', 'create', function() {
+      var err = verifyCustomer(customer)
+      if (err !== null)
+        lib.badRequest(res, err)
+      else {
+        db.db.withCustomerFromNameDo(customer.name, function(err) {
+          if (err == 404) {
+            var id = lib.uuid4()
+            var selfURL = makeSelfURL(req, id)
+            function initialPermissions(teamURL) {
+              return {
+                _self: {read:[teamURL], create: [teamURL], delete: [teamURL]}, 
+                _permissions: {read: [teamURL], update: [teamURL]},
+                dqss: {read:[teamURL], create: [teamURL], delete: [teamURL]}
+              }
             }
-          }
-          createAdminTeamFor(req, res, selfURL, customer.initialCustomerAdmin, initialPermissions, function() {
-            // Create permissions first. If we fail after creating the permissions resource but before creating the main resource, 
-            // there will be a useless but harmless permissions document.
-            // If we do things the other way around, a customer without matching permissions could cause problems.
-            db.createCustomerThen(req, res, id, customer, function(etag) {
-                addCalculatedProperties(req, customer, selfURL)
-                lib.created(req, res, customer, customer.self, etag)
+            createAdminTeamFor(req, res, selfURL, customer.initialCustomerAdmin, initialPermissions, function(teamURL) {
+              // Create permissions first. If we fail after creating the permissions resource but before creating the main resource, 
+              // there will be a useless but harmless permissions document.
+              // If we do things the other way around, a customer without matching permissions could cause problems.
+              customer.customerAdminTeam = teamURL
+              delete customer.initialCustomerAdmin
+              db.createCustomerThen(req, res, id, customer, function(etag) {
+                  addCalculatedProperties(req, customer, selfURL)
+                  lib.created(req, res, customer, customer.self, etag)
+              })
             })
-          })
-        }
-      })
+          } else
+            lib.duplicate(req, res)
+        })
+      }
+    })
   }
-  if (initialized)
-    primCreateCustomer()
-  else
-    init(req, res, primCreateCustomer)
+  if (lib.getUser(req.headers.authorization) == null) 
+    lib.unauthorized(req, res)
+  else 
+    if (initialized)
+      primCreateCustomer()
+    else
+      init(req, res, primCreateCustomer)
 }
 
 function makeSelfURL(req, key) {
@@ -116,22 +122,24 @@ function addCalculatedProperties(req, entity, selfURL) {
 }
 
 function getCustomer(req, res, id) {
-  pLib.ifAllowedThen(req, res, '//' + req.headers.host + req.url, '_self', 'read', function() {
+  var trueURL = makeSelfURL(req, id)
+  pLib.ifAllowedThen(req, res, trueURL, '_self', 'read', function() {
     db.withCustomerDo(req, res, id, function(customer , etag) {
       var selfURL = makeSelfURL(req, id)
       addCalculatedProperties(req, customer, selfURL)
-      lib.found(req, res, customer, etag)
+      lib.found(req, res, customer, etag, trueURL)
     })
   })
 }
 
 function deleteCustomer(req, res, id) {
-  pLib.ifAllowedThen(req, res, '//' + req.headers.host + req.url, '_self', 'delete', function() {
+  var trueURL = makeSelfURL(req, id)
+  pLib.ifAllowedThen(req, res, trueURL, '_self', 'delete', function() {
     lib.sendInternalRequestThen(req.headers, res, `/permissions?/customers;${id}`, 'DELETE', null, function (err, clientRes) {
       db.deleteCustomerThen(req, res, id, function (customer, etag) {
         var selfURL = makeSelfURL(req, id)
         addCalculatedProperties(req, customer, selfURL)
-        lib.found(req, res, customer, etag)
+        lib.found(req, res, customer, etag, trueURL)
       })
     })
   })
@@ -156,7 +164,7 @@ function requestHandler(req, res) {
     if (req_url.pathname.startsWith(CUST) && req_url.search == null) 
       handleCustomerMethods(req_url.pathname.substring(CUST.length))
     else if (req_url.pathname.startsWith('/customers;') && req_url.search == null) 
-      db.withCustomerFromNameDo(req, res, req_url.pathname.split('/')[0].substring('/customers;'.length), function(id) {
+      db.withCustomerFromNameDo(req, res, req_url.pathname.split('/')[1].substring('customers;'.length), function(id) {
         handleCustomerMethods(id)
       })
     else

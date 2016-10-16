@@ -68,7 +68,7 @@ function withCustomerDo(id, callback) {
 }
 
 function withCustomerFromNameDo(name, callback) {
-  pool.query(`SELECT etag, data FROM customers WHERE data @> '{"name": "${name}"}'`, function (err, pg_res) {
+  pool.query(`SELECT id, etag, data FROM customers WHERE data @> '{"name": "${name}"}'`, function (err, pg_res) {
     if (err)
       callback(500)
     else 
@@ -78,7 +78,7 @@ function withCustomerFromNameDo(name, callback) {
         callback(409)
       else {
         var row = pg_res.rows[0]
-        callback(null, row.data, row.etag)
+        callback(null, row.id, row.data, row.etag)
       }
   })
 }
