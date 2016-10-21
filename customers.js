@@ -6,7 +6,6 @@ const pLib = require('permissions-helper-functions')
 const db = require('./customers-db')
 
 var initialized = false
-const baseURL = `${process.env.INTERNAL_PROTOCOL}://${process.env.INTERNAL_ROUTER}`
 const CUST = '/cust-'
 
 function createAdminTeamFor(serverReq, serverRes, subject, initialMember, permissions_f, callback) {
