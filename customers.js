@@ -118,7 +118,7 @@ function makeSelfURL(req, key) {
 
 function addCalculatedProperties(req, entity, selfURL) {
   entity.self = selfURL
-  entity._permissions = `protocol://authority/permissions?${entity.self}`
+  entity._permissions = `scheme://authority/permissions?${entity.self}`
 }
 
 function getCustomer(req, res, id) {
