@@ -12,7 +12,7 @@ function createAdminTeamFor(serverReq, serverRes, subject, initialMember, permis
   function secureSubject(teamURL) {
     var permissions = permissions_f(teamURL)
     permissions._subject = subject
-    lib.sendInternalRequestThen(serverReq.headers, serverRes, '/permissions', 'POST', JSON.stringify(permissions), function (clientRes) {
+    lib.sendInternalRequestThen(serverReq, serverRes, '/permissions', 'POST', JSON.stringify(permissions), function (clientRes) {
       lib.getClientResponseBody(clientRes, function(body) {
         if (clientRes.statusCode == 201) {
           initialized = true
@@ -24,7 +24,7 @@ function createAdminTeamFor(serverReq, serverRes, subject, initialMember, permis
   }
   // because of the null relative URLs ('') in the following, the administrator for the team is the team itself
   var admins = {isA: 'Team', members: [initialMember], permissions: {_self: {read: [''], update: ['']}, _permissions: {read: [''], update: ['']}}} // '' is null relative URL
-  lib.sendInternalRequestThen(serverReq.headers, serverRes, '/teams', 'POST', JSON.stringify(admins), function (clientRes) {
+  lib.sendInternalRequestThen(serverReq, serverRes, '/teams', 'POST', JSON.stringify(admins), function (clientRes) {
     lib.getClientResponseBody(clientRes, function(body) {
       if (clientRes.statusCode == 201)
         secureSubject(clientRes.headers.location)
@@ -36,7 +36,7 @@ function createAdminTeamFor(serverReq, serverRes, subject, initialMember, permis
 
 function init(serverReq, serverRes, callback) {
   // make sure there is a hostAdmin team. If not, create it and specify that only members of that team can create customers
-  lib.sendInternalRequestThen(serverReq.headers, serverRes, '/permissions?/customers', 'GET', null, function (clientRes) {
+  lib.sendInternalRequestThen(serverReq, serverRes, '/permissions?/customers', 'GET', null, function (clientRes) {
     lib.getClientResponseBody(clientRes, function(body) {
       if (clientRes.statusCode == 404) {
         var initialAdmin = lib.getUser(serverReq.headers.authorization)
@@ -134,7 +134,7 @@ function getCustomer(req, res, id) {
 function deleteCustomer(req, res, id) {
   var trueURL = makeSelfURL(req, id)
   pLib.ifAllowedThen(req, res, trueURL, '_self', 'delete', function() {
-    lib.sendInternalRequestThen(req.headers, res, `/permissions?/customers;${id}`, 'DELETE', null, function (err, clientRes) {
+    lib.sendInternalRequestThen(req, res, `/permissions?/customers;${id}`, 'DELETE', null, function (err, clientRes) {
       db.deleteCustomerThen(req, res, id, function (customer, etag) {
         var selfURL = makeSelfURL(req, id)
         addCalculatedProperties(req, customer, selfURL)
