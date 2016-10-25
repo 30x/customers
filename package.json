@@ -20,8 +20,8 @@
   },
   "homepage": "https://github.com/30x/customers#readme",
   "dependencies": {
-    "http-helper-functions": "0.0.44",
-    "permissions-helper-functions": "0.0.9",
+    "http-helper-functions": "0.0.47",
+    "permissions-helper-functions": "0.0.11",
     "pg": "^6.1.0"
   }
 }
